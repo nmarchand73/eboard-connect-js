@@ -68,20 +68,16 @@ export class HidTransport implements BoardTransport {
     this.errorHandler = handler;
   }
 
-  async connect(): Promise<void> {
+  async connect(options?: { reconnect?: boolean }): Promise<void> {
     if (!isHidSupported()) {
       throw new Error("WebHID is not available in this browser");
     }
 
     await this.disconnect();
 
-    const devices = await navigator.hid.requestDevice({
-      filters: [{ vendorId: HID_VENDOR_ID }],
-    });
-    const device = devices[0];
-    if (!device) {
-      throw new Error("No Chessnut HID device selected");
-    }
+    const device = options?.reconnect
+      ? await this.pickRememberedDevice()
+      : await this.requestNewDevice();
 
     await device.open();
     this.device = device;
@@ -91,6 +87,26 @@ export class HidTransport implements BoardTransport {
     // Realtime enable: reportId 0x21, payload [0x01, 0x00]
     const realtimePayload = CMD_ENABLE_REALTIME.slice(1);
     await device.sendReport(HID_REPORT_REALTIME, realtimePayload);
+  }
+
+  private async requestNewDevice(): Promise<HIDDevice> {
+    const devices = await navigator.hid.requestDevice({
+      filters: [{ vendorId: HID_VENDOR_ID }],
+    });
+    const device = devices[0];
+    if (!device) {
+      throw new Error("No Chessnut HID device selected");
+    }
+    return device;
+  }
+
+  private async pickRememberedDevice(): Promise<HIDDevice> {
+    const devices = await navigator.hid.getDevices();
+    const chessnut = devices.find((d) => d.vendorId === HID_VENDOR_ID);
+    if (!chessnut) {
+      throw new Error("No previously paired Chessnut HID device — connect once with the chooser");
+    }
+    return chessnut;
   }
 
   async disconnect(): Promise<void> {

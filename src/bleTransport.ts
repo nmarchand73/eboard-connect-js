@@ -23,6 +23,78 @@ function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
   return true;
 }
 
+function isChessnutDevice(device: BluetoothDevice): boolean {
+  const name = (device.name || "").toLowerCase();
+  return name.includes("chessnut");
+}
+
+async function waitForAdvertisement(
+  device: BluetoothDevice,
+  timeoutMs: number,
+): Promise<void> {
+  const watchable = device as BluetoothDevice & {
+    watchAdvertisements?: () => Promise<void>;
+  };
+  if (typeof watchable.watchAdvertisements !== "function") {
+    return;
+  }
+
+  await watchable.watchAdvertisements();
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error("Timed out waiting for Chessnut BLE advertisement"));
+    }, timeoutMs);
+
+    const onAdv = () => {
+      cleanup();
+      resolve();
+    };
+    const cleanup = () => {
+      clearTimeout(timer);
+      device.removeEventListener("advertisementreceived", onAdv);
+    };
+    device.addEventListener("advertisementreceived", onAdv);
+  });
+}
+
+/**
+ * Connect GATT. After a page refresh Chrome often needs an advertisement
+ * before gattserver.connect() succeeds — watch first when reconnecting.
+ */
+async function connectGatt(
+  device: BluetoothDevice,
+  timeoutMs = 15000,
+  reconnect = false,
+): Promise<BluetoothRemoteGATTServer> {
+  if (!device.gatt) {
+    throw new Error("Bluetooth device has no GATT server");
+  }
+  if (device.gatt.connected) {
+    return device.gatt;
+  }
+
+  if (reconnect) {
+    try {
+      await waitForAdvertisement(device, Math.min(timeoutMs, 10000));
+    } catch {
+      // watchAdvertisements may need a gesture or the board may be asleep —
+      // still attempt a direct connect below.
+    }
+  }
+
+  try {
+    return await device.gatt.connect();
+  } catch (firstErr) {
+    try {
+      await waitForAdvertisement(device, timeoutMs);
+      return await device.gatt.connect();
+    } catch {
+      throw firstErr instanceof Error ? firstErr : new Error(String(firstErr));
+    }
+  }
+}
+
 export class BleTransport implements BoardTransport {
   readonly kind = "ble" as const;
 
@@ -99,26 +171,53 @@ export class BleTransport implements BoardTransport {
     this.buttonHandler = handler;
   }
 
-  async connect(): Promise<void> {
+  async connect(options?: { reconnect?: boolean }): Promise<void> {
     if (!isBleSupported()) {
       throw new Error("Web Bluetooth is not available in this browser");
     }
 
     await this.disconnect();
 
-    const device = await navigator.bluetooth.requestDevice({
+    const device = options?.reconnect
+      ? await this.pickRememberedDevice()
+      : await this.requestNewDevice();
+
+    this.device = device;
+    device.addEventListener("gattserverdisconnected", this.onGattDisconnected);
+
+    const server = await connectGatt(device, 15000, options?.reconnect === true);
+    await this.bindServices(server);
+  }
+
+  private async requestNewDevice(): Promise<BluetoothDevice> {
+    return navigator.bluetooth.requestDevice({
       filters: [
         { namePrefix: "Chessnut" },
         { services: [FEN_SERVICE_UUID] },
       ],
       optionalServices: [FEN_SERVICE_UUID, OPS_SERVICE_UUID],
     });
+  }
 
-    this.device = device;
-    device.addEventListener("gattserverdisconnected", this.onGattDisconnected);
+    private async pickRememberedDevice(): Promise<BluetoothDevice> {
+    if (typeof navigator.bluetooth.getDevices !== "function") {
+      throw new Error("Bluetooth getDevices() is not supported in this browser");
+    }
+    const devices = await navigator.bluetooth.getDevices();
+    const chessnut = devices.find((d) => isChessnutDevice(d));
+    // After refresh, name is sometimes empty — prefer Chessnut-named, else sole granted device
+    const device = chessnut ?? (devices.length === 1 ? devices[0] : undefined);
+    if (!device) {
+      throw new Error(
+        devices.length
+          ? "Granted BLE device is not a Chessnut — connect once with the chooser"
+          : "No previously paired Chessnut BLE device — connect once with the chooser",
+      );
+    }
+    return device;
+  }
 
-    const server = await device.gatt!.connect();
-
+  private async bindServices(server: BluetoothRemoteGATTServer): Promise<void> {
     const fenService = await server.getPrimaryService(FEN_SERVICE_UUID);
     const opsService = await server.getPrimaryService(OPS_SERVICE_UUID);
 

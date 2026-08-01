@@ -69,7 +69,7 @@ export class ChessnutBoard {
       transport.onButton?.((buttonId) => {
         this.emitter.emit("button", buttonId);
       });
-      await transport.connect();
+      await transport.connect({ reconnect: options.reconnect === true });
       this.transport = transport;
     } finally {
       this.connecting = false;

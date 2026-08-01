@@ -21,11 +21,17 @@ export type ChessnutEventName = keyof ChessnutBoardEvents;
 
 export type ConnectOptions = {
   transport: TransportKind;
+  /**
+   * Reuse a previously permitted device (no chooser).
+   * BLE: `navigator.bluetooth.getDevices()`
+   * HID: `navigator.hid.getDevices()`
+   */
+  reconnect?: boolean;
 };
 
 export interface BoardTransport {
   readonly kind: TransportKind;
-  connect(): Promise<void>;
+  connect(options?: { reconnect?: boolean }): Promise<void>;
   disconnect(): Promise<void>;
   setLeds(squares: readonly string[]): Promise<void>;
   getBattery(): Promise<BatteryStatus>;

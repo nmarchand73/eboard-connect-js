@@ -28,6 +28,16 @@ npm install ../../eboard-connect-js
 
 Optional peer for move inference: `chess.js`.
 
+For a **vanilla JS (no bundler)** host such as Chess Insight, build the browser IIFE:
+
+```bash
+cd /path/to/chess/eboard-connect-js
+npm install
+npx esbuild src/browser.ts --bundle --format=iife --global-name=EboardConnect --outfile=../CHESS_ANALYSER/web-app/frontend/js/vendor/eboard-connect.js --platform=browser
+```
+
+Then load `eboard-connect.js` and use `window.EboardConnect.ChessnutBoard`.
+
 ```bash
 cd /path/to/chess/eboard-connect-js
 npm install
@@ -48,6 +58,9 @@ board.on("position", ({ placement }) => {
 
 board.on("disconnect", () => console.log("disconnected"));
 board.on("error", (err) => console.error(err));
+
+// After a page refresh, reconnect without the chooser (same origin permission):
+// await board.connect({ transport: "ble", reconnect: true });
 
 if (isBleSupported()) {
   await board.connect({ transport: "ble" });
