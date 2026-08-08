@@ -1,7 +1,7 @@
 {
   "name": "eboard-connect-js",
   "version": "0.1.0",
-  "description": "Browser library to connect electronic chess boards (Chessnut via Web Bluetooth and WebHID)",
+  "description": "Browser library to connect electronic chess boards (Chessnut via Web Bluetooth/WebHID, ChessUp via Web Bluetooth)",
   "type": "module",
   "exports": {
     ".": {
@@ -11,11 +11,12 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "examples"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "npm run build && node --test dist/protocol.test.js dist/inferMove.test.js",
+    "test": "npm run build && node --test dist/protocol.test.js dist/inferMove.test.js dist/chessupProtocol.test.js dist/chessupGuard.test.js",
     "prepare": "npm run build"
   },
   "peerDependencies": {

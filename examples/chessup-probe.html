@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ChessUp BLE probe</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family: ui-sans-serif, system-ui, sans-serif;
+      }
+      body {
+        margin: 1.5rem;
+        max-width: 52rem;
+        line-height: 1.45;
+      }
+      h1 {
+        font-size: 1.35rem;
+        margin: 0 0 0.5rem;
+      }
+      .row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        margin: 1rem 0;
+      }
+      button {
+        font: inherit;
+        padding: 0.45rem 0.85rem;
+        cursor: pointer;
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      #status {
+        font-weight: 600;
+      }
+      #log {
+        white-space: pre-wrap;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.8rem;
+        border: 1px solid color-mix(in srgb, CanvasText 25%, transparent);
+        border-radius: 6px;
+        padding: 0.75rem;
+        min-height: 16rem;
+        max-height: 28rem;
+        overflow: auto;
+        background: color-mix(in srgb, Canvas 92%, CanvasText 8%);
+      }
+      .muted {
+        opacity: 0.75;
+        font-size: 0.9rem;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>ChessUp BLE probe</h1>
+    <p class="muted">
+      Chromium only (Chrome / Edge), <code>localhost</code> or HTTPS. Power on the ChessUp,
+      leave the official app disconnected, then connect. This probe is <strong>listen-only</strong>
+      (ACK + get state) — it will not push moves or FEN onto the board. Logs Nordic UART notifies
+      and parsed message kinds.
+    </p>
+    <p>Status: <span id="status">idle</span></p>
+    <div class="row">
+      <button type="button" id="connect">Connect (chooser)</button>
+      <button type="button" id="reconnect" disabled>Reconnect</button>
+      <button type="button" id="getState" disabled>Get board state</button>
+      <button type="button" id="disconnect" disabled>Disconnect</button>
+      <button type="button" id="clear">Clear log</button>
+    </div>
+    <div id="log"></div>
+
+    <script type="module">
+      import {
+        ChessUpBoard,
+        isBleSupported,
+      } from "../dist/index.js";
+
+      const statusEl = document.getElementById("status");
+      const logEl = document.getElementById("log");
+      const connectBtn = document.getElementById("connect");
+      const reconnectBtn = document.getElementById("reconnect");
+      const getStateBtn = document.getElementById("getState");
+      const disconnectBtn = document.getElementById("disconnect");
+      const clearBtn = document.getElementById("clear");
+
+      const board = new ChessUpBoard();
+      let connected = false;
+
+      function setConnected(value) {
+        connected = value;
+        statusEl.textContent = value ? "connected" : "idle";
+        reconnectBtn.disabled = false;
+        getStateBtn.disabled = !value;
+        disconnectBtn.disabled = !value;
+      }
+
+      function log(line) {
+        const ts = new Date().toISOString().slice(11, 19);
+        logEl.textContent += `[${ts}] ${line}\n`;
+        logEl.scrollTop = logEl.scrollHeight;
+      }
+
+      board.on("probe", ({ hex, summary }) => {
+        log(`notify ${hex} → ${summary}`);
+      });
+      board.on("boardState", (state) => {
+        log(`boardState ${state.fen}`);
+      });
+      board.on("move", (move) => {
+        log(`move ${move.from}${move.to}`);
+      });
+      board.on("touch", ({ square, piece }) => {
+        log(`touch ${square} ${piece ?? "."}`);
+      });
+      board.on("promotion", ({ piece }) => {
+        log(`promotion ${piece ?? "?"}`);
+      });
+      board.on("disconnect", () => {
+        setConnected(false);
+        log("disconnect");
+      });
+      board.on("error", (err) => {
+        log(`error ${err.message}`);
+      });
+
+      async function connect(reconnect) {
+        if (!isBleSupported()) {
+          log("Web Bluetooth unavailable — use Chrome/Edge on HTTPS or localhost");
+          return;
+        }
+        statusEl.textContent = "connecting…";
+        try {
+          await board.connect({ reconnect, probe: true, allowMutatingCommands: false });
+          setConnected(true);
+          log(reconnect ? "reconnected" : "connected");
+        } catch (err) {
+          setConnected(false);
+          log(`connect failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+
+      connectBtn.addEventListener("click", () => void connect(false));
+      reconnectBtn.addEventListener("click", () => void connect(true));
+      getStateBtn.addEventListener("click", () => {
+        void board.requestBoardState().catch((err) => {
+          log(`getState failed: ${err instanceof Error ? err.message : String(err)}`);
+        });
+      });
+      disconnectBtn.addEventListener("click", () => {
+        void board.disconnect().then(() => {
+          setConnected(false);
+          log("disconnected by user");
+        });
+      });
+      clearBtn.addEventListener("click", () => {
+        logEl.textContent = "";
+      });
+
+      if (!isBleSupported()) {
+        statusEl.textContent = "Web Bluetooth unavailable";
+        connectBtn.disabled = true;
+      } else {
+        log("Ready — click Connect with the ChessUp powered on.");
+      }
+    </script>
+  </body>
+</html>
